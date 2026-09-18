@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Robot City</title>
+</head>
+<body>
+  <div id="scene"></div>
+
+  <header id="brand-panel" class="panel">
+    <div class="brand-row">
+      <div class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="5" y="8" width="14" height="10" rx="3"/>
+          <circle cx="10" cy="13" r="1.4" fill="currentColor" stroke="none"/>
+          <circle cx="14" cy="13" r="1.4" fill="currentColor" stroke="none"/>
+          <path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/>
+          <path d="M5 12H3M21 12h-2"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Robot City</h1>
+        <p>A smarter, friendlier world — built by robots, for robots.</p>
+      </div>
+    </div>
+    <nav id="main-nav">
+      <button class="nav-btn active" data-view="map">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg>
+        Map
+      </button>
+      <button class="nav-btn" data-view="town">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M4 21V9l5-3v15M13 21V5l7 3v13M7 12h.01M7 16h.01M16 11h.01M16 15h.01"/></svg>
+        Town Overview
+      </button>
+      <button class="nav-btn" data-view="buildings">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4h6v4M9 10h.01M15 10h.01M12 13h.01"/></svg>
+        Buildings
+      </button>
+      <button class="nav-btn" data-view="objects">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8 12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+        Objects
+      </button>
+      <button class="nav-btn" data-view="robots">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="8" width="12" height="9" rx="2.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="10" cy="12" r=".8" fill="currentColor"/><circle cx="14" cy="12" r=".8" fill="currentColor"/></svg>
+        Robots
+      </button>
+      <button class="nav-btn" data-view="settings">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.15-1.45l2-1.55-2-3.46-2.37.95A7 7 0 0 0 14 5.05L13.6 2.5h-3.2L10 5.05a7 7 0 0 0-2.48 1.44l-2.37-.95-2 3.46 2 1.55A7 7 0 0 0 5 12c0 .49.05.97.15 1.45l-2 1.55 2 3.46 2.37-.95A7 7 0 0 0 10 18.95l.4 2.55h3.2l.4-2.55a7 7 0 0 0 2.48-1.44l2.37.95 2-3.46-2-1.55c.1-.48.15-.96.15-1.45z"/></svg>
+        Settings
+      </button>
+      <button class="nav-btn" id="nav-place" aria-pressed="false" title="Pick a spot for a new building">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><path d="M12 7v6M9 10h6"/></svg>
+        Add Building
+      </button>
+      <button class="nav-btn" id="nav-ai" aria-expanded="false" title="Toggle AI assistant">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a7.5 7.5 0 0 1-7.5 7.5H9l-4.5 3v-5.2A7.5 7.5 0 1 1 21 11.5z"/></svg>
+        AI Assistant
+      </button>
+    </nav>
+  </header>
+
+  <div id="compass" aria-hidden="true">
+    <span class="c-n">N</span><span class="c-e">E</span><span class="c-s">S</span><span class="c-w">W</span>
+    <div id="needle"></div>
+  </div>
+  <div id="zoom-controls">
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-out" title="Zoom out">−</button>
+  </div>
+
+  <div id="minimap-card" class="panel">
+    <canvas id="minimap" width="232" height="150"></canvas>
+    <button id="expand-map">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+      <span id="expand-map-label">Expand Map</span>
+    </button>
+  </div>
+
+  <section id="ai-panel" class="panel hidden" role="region" aria-label="AI assistant">
+    <header id="ai-header">
+      <div class="ai-title">
+        <b>AI Assistant</b>
+        <span id="ai-model-label" class="muted">No model configured</span>
+      </div>
+      <button id="ai-collapse" aria-expanded="true" aria-controls="ai-body" title="Collapse">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </header>
+    <div id="ai-body">
+      <div id="ai-messages"></div>
+      <div id="ai-empty" class="hidden">
+        <p>No model is wired up yet.</p>
+        <button id="ai-open-settings" type="button" class="btn-primary">Configure a model in Settings</button>
+      </div>
+      <form id="ai-composer">
+        <textarea id="ai-input" rows="2" placeholder="Ask about the town… (Enter to send)"></textarea>
+        <button id="ai-send" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <div id="place-banner" class="hidden" role="status" aria-live="polite">
+    <span id="place-banner-text"></span>
+    <button id="place-cancel" type="button">Cancel</button>
+  </div>
+
+  <div id="space-prompt" class="hidden" role="dialog" aria-modal="true" aria-labelledby="sp-title">
+    <div class="sp-card">
+      <h2 id="sp-title">No indoor space yet</h2>
+      <p id="sp-text" class="muted"></p>
+      <div class="sp-actions">
+        <button id="sp-default" type="button" class="btn-primary">Generate from attributes</button>
+        <button id="sp-ai" type="button" class="btn-ghost">Design with AI</button>
+        <button id="sp-cancel" type="button" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fn-panel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="fn-title">
+    <div class="fn-card">
+      <header class="fn-head">
+        <div class="fn-head-text">
+          <h2 id="fn-title">Functions</h2>
+          <p class="muted fn-sub">Pick a function: the left is the system prompt it sends, the right is every call it has made.</p>
+        </div>
+        <button id="fn-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="fn-body">
+        <nav id="fn-list" class="fn-nav" aria-label="AI functions"></nav>
+        <div id="fn-detail" class="fn-detail-area"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="robot-panel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="rb-title">
+    <div class="rb-card">
+      <header class="rb-head">
+        <div class="rb-head-text">
+          <h2 id="rb-title">Robots</h2>
+          <p class="muted rb-sub">Deployed robots on the left, the model library underneath. Pick one to manage it.</p>
+        </div>
+        <button id="rb-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="rb-body">
+        <nav class="rb-nav" aria-label="Robots and robot models">
+          <input id="rb-search" type="search" placeholder="Search robots…" spellcheck="false" autocomplete="off" />
+          <h3 class="rb-nav-h">Deployed <b id="rb-count">0</b></h3>
+          <div id="rb-list"></div>
+          <p id="rb-empty" class="muted rb-empty hidden">No robots match.</p>
+          <h3 class="rb-nav-h">Model library</h3>
+          <div id="rb-types"></div>
+          <p class="muted rb-later">Later stage: import a robot from a file upload or a URL.</p>
+        </nav>
+        <div class="rb-detail">
+          <div class="rb-fields">
+            <div id="rb-none" class="rb-block">
+              <p class="muted">Pick a robot on the left to manage it, or a model from the library to deploy one into a building.</p>
+            </div>
+            <div id="rb-item" class="rb-block hidden">
+              <h3 id="rb-item-h" class="rb-item-h">Robot</h3>
+              <div class="rb-field">
+                <label for="rb-name">Name</label>
+                <input id="rb-name" type="text" maxlength="32" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="rb-field">
+                <label for="rb-model">Model</label>
+                <select id="rb-model"></select>
+              </div>
+              <div class="rb-field">
+                <label for="rb-color">Colour</label>
+                <input id="rb-color" type="color" />
+              </div>
+              <div class="rb-field">
+                <label for="rb-size">Size</label>
+                <input id="rb-size" type="range" step="0.05" />
+                <output id="rb-size-val" for="rb-size"></output>
+              </div>
+              <div class="rb-field">
+                <label for="rb-speed">Speed</label>
+                <input id="rb-speed" type="range" step="0.1" />
+                <output id="rb-speed-val" for="rb-speed"></output>
+              </div>
+              <div class="rb-field">
+                <label for="rb-home">Home</label>
+                <select id="rb-home"></select>
+              </div>
+              <p id="rb-status" class="muted rb-status"></p>
+              <div class="rb-actions">
+                <button id="rb-focus" type="button" class="btn-primary">Focus</button>
+                <button id="rb-save" type="button" class="btn-ghost">Save</button>
+                <button id="rb-remove" type="button" class="btn-ghost">Remove</button>
+              </div>
+            </div>
+            <div id="rb-type-item" class="rb-block hidden">
+              <h3 id="rb-type-name" class="rb-item-h">Model</h3>
+              <p id="rb-type-desc" class="muted rb-desc"></p>
+              <p id="rb-type-meta" class="muted rb-meta"></p>
+              <div class="rb-field">
+                <label for="rb-type-home">Deploy to</label>
+                <select id="rb-type-home"></select>
+              </div>
+              <p class="muted rb-hint-sm">Standing inside a building deploys into that room. Deployed robots also walk the streets.</p>
+              <div class="rb-actions">
+                <button id="rb-deploy" type="button" class="btn-primary">Deploy</button>
+              </div>
+            </div>
+          </div>
+          <aside class="rb-preview">
+            <canvas id="rb-canvas" width="260" height="200"></canvas>
+            <p id="rb-preview-note" class="muted rb-preview-note hidden">3D preview is not available in this browser.</p>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="town-panel" class="dlg hidden" role="dialog" aria-modal="true" aria-labelledby="tw-title">
+    <div class="dlg-card">
+      <header class="dlg-head">
+        <div class="dlg-head-text">
+          <h2 id="tw-title">Town Overview</h2>
+          <p class="muted dlg-sub">What the town is made of right now — updated live as robots, buildings and objects change.</p>
+        </div>
+        <button id="tw-close" class="dlg-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dlg-body pane">
+        <div class="tw-grid">
+          <div class="stat"><span>Population</span><b id="stat-robots">–</b></div>
+          <div class="stat"><span>Buildings</span><b id="stat-buildings">–</b></div>
+          <div class="stat"><span>Map span</span><b id="stat-area">–</b></div>
+          <div class="stat"><span>Sectors</span><b id="stat-sectors">–</b></div>
+          <div class="stat"><span>Indoor spaces</span><b id="stat-spaces">–</b></div>
+          <div class="stat"><span>Objects placed</span><b id="stat-objects">–</b></div>
+          <div class="stat"><span>Robot models</span><b id="stat-models">–</b></div>
+          <div class="stat"><span>Deployed by you</span><b id="stat-deployed">–</b></div>
+        </div>
+        <div id="town-status" class="status">All systems operational</div>
+        <div id="robots-config">
+          <p class="muted rb-hint">Every robot in town, each with its own item panel — plus the model library they are deployed from.</p>
+          <button id="robots-open" class="btn-ghost" type="button">Open the robot page</button>
+          <p id="robots-summary" class="muted rb-summary"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="buildings-panel" class="dlg hidden" role="dialog" aria-modal="true" aria-labelledby="bd-title">
+    <div class="dlg-card">
+      <header class="dlg-head">
+        <div class="dlg-head-text">
+          <h2 id="bd-title">Buildings</h2>
+          <p class="muted dlg-sub">Every building in town on the left. Pick one to read it, fly to it, or step inside.</p>
+        </div>
+        <button id="bd-close" class="dlg-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dlg-body">
+        <nav class="dlg-nav" aria-label="Buildings">
+          <input id="building-search" type="search" placeholder="Search buildings…" spellcheck="false" autocomplete="off" />
+          <div id="building-list"></div>
+          <p id="building-empty" class="muted hidden">No buildings match.</p>
+        </nav>
+        <div class="dlg-detail">
+          <div id="bd-none">
+            <p class="muted">Pick a building on the left to read what it is for, how big it is, and who works in it.</p>
+          </div>
+          <div id="bd-item" class="hidden">
+            <h3 id="bd-name">Building</h3>
+            <span id="bd-type" class="dlg-badge"></span>
+            <p id="bd-desc" class="muted dlg-desc"></p>
+            <div class="dlg-stats">
+              <div class="stat"><span>Footprint</span><b id="bd-footprint">–</b></div>
+              <div class="stat"><span>Position</span><b id="bd-pos">–</b></div>
+              <div class="stat"><span>Robot crew</span><b id="bd-crew">–</b></div>
+              <div class="stat"><span>Indoor space</span><b id="bd-space">–</b></div>
+              <div class="stat"><span>Parts</span><b id="bd-parts">–</b></div>
+            </div>
+            <div class="dlg-actions">
+              <button id="bd-fly" type="button" class="btn-primary">Fly to it</button>
+              <button id="bd-enter" type="button" class="btn-ghost">Step inside</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="objects-panel" class="dlg hidden" role="dialog" aria-modal="true" aria-labelledby="od-title">
+    <div class="dlg-card">
+      <header class="dlg-head">
+        <div class="dlg-head-text">
+          <h2 id="od-title">Objects</h2>
+          <p class="muted dlg-sub">The object library on the left. Pick a type to read it, then place one in the room you are standing in.</p>
+        </div>
+        <button id="od-close" class="dlg-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dlg-body">
+        <nav class="dlg-nav" aria-label="Object types">
+          <input id="object-search" type="search" placeholder="Search object types…" spellcheck="false" autocomplete="off" />
+          <div id="object-list"></div>
+          <p id="object-empty" class="muted hidden">No object types match.</p>
+        </nav>
+        <div class="dlg-detail">
+          <div id="od-none">
+            <p class="muted">Pick an object type on the left to read what it is and where it usually goes.</p>
+          </div>
+          <div id="od-item" class="hidden">
+            <h3 id="od-name">Object</h3>
+            <p id="od-desc" class="muted dlg-desc"></p>
+            <p id="od-tags" class="muted"></p>
+            <p id="od-metrics" class="muted"></p>
+            <p id="od-room" class="muted"></p>
+            <div class="dlg-actions">
+              <button id="od-place" type="button" class="btn-primary">Place one here</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-panel" class="dlg hidden" role="dialog" aria-modal="true" aria-labelledby="st-title">
+    <div class="dlg-card">
+      <header class="dlg-head">
+        <div class="dlg-head-text">
+          <h2 id="st-title">Settings</h2>
+          <p class="muted dlg-sub">Display options and AI functions on the left, model providers on the right.</p>
+        </div>
+        <button id="st-close" class="dlg-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dlg-body pane">
+        <div class="st-grid">
+          <div>
+            <h3 class="cfg-h">Display</h3>
+            <label class="opt"><input type="checkbox" id="opt-shadows" checked /> Soft shadows</label>
+            <label class="opt"><input type="checkbox" id="opt-rotate" /> Auto-rotate camera</label>
+            <div id="functions-config">
+              <h3 class="cfg-h">Functions</h3>
+              <p class="muted fn-hint">Every AI function call: the system prompt it sends, and what each call actually sent.</p>
+              <button id="fn-open" class="btn-ghost" type="button">Open the functions panel</button>
+              <p id="fn-summary" class="muted fn-summary"></p>
+            </div>
+          </div>
+          <div id="model-config">
+            <h3 class="cfg-h">Model Config</h3>
+            <div id="provider-list"></div>
+            <button id="provider-add" class="btn-ghost" type="button">+ Add provider</button>
+            <form id="provider-form" class="hidden" autocomplete="off">
+              <input id="pf-name" placeholder="Provider name" spellcheck="false" />
+              <input id="pf-base-url" placeholder="https://api.example.com/v1" spellcheck="false" />
+              <input id="pf-api-key" type="password" placeholder="API key (stored in this browser only)" spellcheck="false" />
+              <div class="pf-actions">
+                <button type="submit" id="pf-save" class="btn-primary" disabled>Save</button>
+                <button type="button" id="pf-test" disabled>Test connection</button>
+                <button type="button" id="pf-cancel" class="btn-ghost">Cancel</button>
+              </div>
+              <div id="pf-status" class="cfg-status hidden"></div>
+              <div id="pf-model-row" class="hidden">
+                <input id="pf-model-filter" placeholder="Filter models…" disabled />
+                <select id="pf-model" disabled></select>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="object-panel" class="dlg hidden" role="dialog" aria-modal="true" aria-labelledby="ob-name">
+    <div class="dlg-card narrow">
+      <header class="dlg-head">
+        <div class="dlg-head-text">
+          <h2 id="ob-name"></h2>
+          <p class="muted dlg-sub">Resize, recolour or re-material this placed object — or derive a new design from it.</p>
+        </div>
+        <button id="ob-close" class="dlg-close" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dlg-body pane">
+        <p id="ob-meta" class="muted"></p>
+        <p id="ob-pos" class="muted"></p>
+        <div class="ob-grid">
+          <div class="ob-field">
+            <label for="ob-size">Size</label>
+            <input id="ob-size" type="range" step="0.05" />
+            <output id="ob-size-val" for="ob-size"></output>
+          </div>
+          <div class="ob-field">
+            <label for="ob-color">Colour</label>
+            <input id="ob-color" type="color" />
+          </div>
+          <div class="ob-field">
+            <label for="ob-material">Material</label>
+            <select id="ob-material"></select>
+          </div>
+          <div class="ob-field">
+            <label for="ob-shape">Shape</label>
+            <select id="ob-shape"></select>
+          </div>
+        </div>
+        <div class="ob-actions">
+          <button id="ob-save" type="button" class="btn-primary">Save</button>
+          <button id="ob-remove" type="button" class="btn-ghost">Remove</button>
+          <button id="ob-derive" type="button" class="btn-ghost">Derive with AI</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="interior-bar" class="hidden">
+    <b id="interior-name"></b>
+    <span id="interior-type"></span>
+    <span id="interior-hint" class="muted">Drag to orbit · Drag an object to move it · Esc to leave</span>
+    <button id="interior-back" type="button">Back to town</button>
+  </div>
+
+  <div id="tooltip" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
