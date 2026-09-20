@@ -441,12 +441,16 @@ export function initUI(api) {
   const interiorBar = $('#interior-bar');
   const interiorName = $('#interior-name');
   const interiorType = $('#interior-type');
+  const povBar = $('#pov-bar');
+  const povRobot = $('#pov-robot');
+  const povLocation = $('#pov-location');
+  let povActive = false;
 
   function setMode(next, def) {
     const inside = next === 'interior';
-    minimapCard.classList.toggle('hidden', inside);
-    compassEl.classList.toggle('hidden', inside);
-    interiorBar.classList.toggle('hidden', !inside);
+    minimapCard.classList.toggle('hidden', inside || povActive);
+    compassEl.classList.toggle('hidden', inside || povActive);
+    interiorBar.classList.toggle('hidden', !inside || povActive);
     townStatus.textContent = inside && def ? `Inside ${def.name}` : 'All systems operational';
     if (!inside || !def) return;
     interiorName.textContent = def.name;
@@ -456,6 +460,19 @@ export function initUI(api) {
   }
 
   $('#interior-back').addEventListener('click', () => api.exitInterior());
+
+  function setPov(robot, indoors = false) {
+    povActive = !!robot;
+    povBar.classList.toggle('hidden', !povActive);
+    if (!robot) return;
+    povRobot.textContent = robot.name;
+    povLocation.textContent = indoors ? `inside ${robot.homeName}` : 'on the streets';
+    minimapCard.classList.add('hidden');
+    compassEl.classList.add('hidden');
+    interiorBar.classList.add('hidden');
+  }
+
+  $('#pov-exit').addEventListener('click', () => api.exitRobotPov());
 
   const spacePrompt = $('#space-prompt');
   const spText = $('#sp-text');
@@ -672,6 +689,7 @@ export function initUI(api) {
     setPlaceBanner,
     hidePlaceBanner,
     setMode,
+    setPov,
     showSpacePrompt,
     hideSpacePrompt,
     isFunctionsOpen: fns.isOpen,

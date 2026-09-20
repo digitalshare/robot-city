@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ROAD_GRAPH, graphNode, graphNeighbors, nearestGraphNode } from './data.js';
 import { sharedPart } from './custom.js';
 import { world } from './world.js';
-import { robotParts, robotTypeById } from './robots.js';
+import { robotParts, robotRadius, robotTypeById } from './robots.js';
 
 // The street crowd: every robot on the roster that is not standing inside a room walks the road
 // graph. All of them simulate — cheap arithmetic, and it keeps their positions continuous across
@@ -12,6 +12,7 @@ export const CROWD_MAX = 24;
 
 // roads sit at 0.06 and walkways at 0.045
 const STAND_Y = 0.07;
+const LANE_OFFSET = 0.8;
 
 let group = null;
 let walkers = new Map();
@@ -25,9 +26,14 @@ const dist2 = (w) => (w.x - camX) ** 2 + (w.z - camZ) ** 2;
 const keyOf = (rec) => `${rec.modelId}|${rec.color}|${rec.scale ?? 1}`;
 
 function place(w) {
-  w.x = w.a.x + (w.b.x - w.a.x) * w.t;
-  w.z = w.a.z + (w.b.z - w.a.z) * w.t;
-  w.rot = Math.atan2(w.b.x - w.a.x, w.b.z - w.a.z);
+  const dx = w.b.x - w.a.x;
+  const dz = w.b.z - w.a.z;
+  const len = Math.max(0.001, Math.hypot(dx, dz));
+  // Every walker keeps to the same side relative to its direction. Robots travelling opposite
+  // ways therefore occupy opposite lanes instead of sharing the graph's exact centreline.
+  w.x = w.a.x + dx * w.t - (dz / len) * LANE_OFFSET;
+  w.z = w.a.z + dz * w.t + (dx / len) * LANE_OFFSET;
+  w.rot = Math.atan2(dx, dz);
 }
 
 // walk on to the next edge, never straight back the way it came unless the node is a dead end
@@ -44,7 +50,7 @@ function nextEdge(w) {
   return true;
 }
 
-function makeWalker(rec) {
+function makeWalker(rec, existing = []) {
   const home = world.buildings.find((b) => b.id === rec.home);
   const node = (home && nearestGraphNode(home.pos[0], home.pos[1], (n) => !n.id.startsWith('b:')))
     || ROAD_GRAPH.nodes[0];
@@ -59,18 +65,57 @@ function makeWalker(rec) {
     z: node.z,
     rot: 0,
     speed: rec.speed || 1.5,
+    radius: robotRadius(rec),
     phase: Math.random() * Math.PI * 2,
     mesh: null,
+    yields: 0,
   };
   nextEdge(w);
   // spread the crowd along their first edges instead of clustering at the nearest node
   w.t = Math.random();
   place(w);
+  // New robots sharing a home should not spawn inside a robot already on that first road edge.
+  for (let i = 0; i < 80; i++) {
+    const clear = existing.every((other) =>
+      Math.hypot(w.x - other.x, w.z - other.z) >= w.radius + other.radius + 0.2);
+    if (clear) break;
+    w.t = Math.random();
+    place(w);
+  }
   return w;
 }
 
-function step(w, dt) {
-  w.t += (w.speed * dt) / w.len;
+function trafficFactor(w, all) {
+  const dx = w.b.x - w.a.x;
+  const dz = w.b.z - w.a.z;
+  const len = Math.max(0.001, Math.hypot(dx, dz));
+  const ux = dx / len;
+  const uz = dz / len;
+  let factor = 1;
+  for (const other of all) {
+    if (other === w) continue;
+    const rx = other.x - w.x;
+    const rz = other.z - w.z;
+    const ahead = rx * ux + rz * uz;
+    const lateral = Math.abs(rx * uz - rz * ux);
+    const safe = w.radius + other.radius + 0.22;
+    if (ahead <= 0 || ahead > safe + 1.2 || lateral > safe) continue;
+
+    // A trailing robot slows smoothly. At crossings, the stable id tie-break prevents both robots
+    // from stopping forever while still ensuring one yields before their shells touch.
+    const samePath = (w.a.id === other.a.id && w.b.id === other.b.id);
+    if (samePath || w.id.localeCompare(other.id) > 0) {
+      factor = Math.min(factor, THREE.MathUtils.clamp((ahead - safe) / 0.9, 0, 1));
+    }
+  }
+  return factor;
+}
+
+function step(w, dt, all) {
+  const factor = trafficFactor(w, all);
+  if (factor < 0.98) w.yields++;
+  const before = { a: w.a, b: w.b, t: w.t, len: w.len, x: w.x, z: w.z, rot: w.rot };
+  w.t += (w.speed * factor * dt) / w.len;
   let guard = 0;
   while (w.t >= 1 && guard++ < 4) {
     w.t -= 1;
@@ -80,6 +125,15 @@ function step(w, dt) {
     }
   }
   place(w);
+
+  // Lane offsets can converge briefly where two graph edges meet. Refuse that proposed step rather
+  // than allowing the shells to overlap, then try again next frame after the other robot advances.
+  const collision = all.some((other) => other !== w &&
+    Math.hypot(w.x - other.x, w.z - other.z) < w.radius + other.radius + 0.08);
+  if (collision) {
+    Object.assign(w, before);
+    w.yields++;
+  }
 }
 
 // Re-mesh a pooled group only when the robot wearing it changed model, colour or size. Shared
@@ -110,9 +164,10 @@ export function syncCrowd() {
     if (prev) {
       prev.key = keyOf(rec);
       prev.speed = rec.speed || 1.5;
+      prev.radius = robotRadius(rec);
       next.set(rec.id, prev);
     } else {
-      const w = makeWalker(rec);
+      const w = makeWalker(rec, [...next.values()]);
       next.set(w.id, w);
     }
   }
@@ -170,7 +225,8 @@ export function initCrowd(scene) {
 
 export function updateCrowd(dt, now, cam) {
   if (!group) return;
-  for (const w of walkers.values()) step(w, dt);
+  const all = [...walkers.values()];
+  for (const w of all) step(w, dt, all);
   assignMeshes(cam, now);
 }
 
@@ -180,6 +236,12 @@ export function crowdRobotPos(id) {
   return w ? { x: w.x, z: w.z } : null;
 }
 
+// Camera consumers need the simulated walker even when it is outside the limited mesh pool.
+export function crowdRobotView(id) {
+  const w = walkers.get(id);
+  return w ? { x: w.x, y: STAND_Y, z: w.z, rot: w.rot } : null;
+}
+
 export function crowdStats() {
   const sample = [];
   let i = 0;
@@ -187,11 +249,25 @@ export function crowdStats() {
     if (i++ >= 4) break;
     sample.push([Math.round(w.x * 100) / 100, Math.round(w.z * 100) / 100]);
   }
+  const all = [...walkers.values()];
+  let minClearance = Infinity;
+  let yields = 0;
+  for (let p = 0; p < all.length; p++) {
+    yields += all[p].yields;
+    for (let q = p + 1; q < all.length; q++) {
+      minClearance = Math.min(
+        minClearance,
+        Math.hypot(all[p].x - all[q].x, all[p].z - all[q].z) - all[p].radius - all[q].radius
+      );
+    }
+  }
   return {
     total: walkers.size,
     visible: pool.reduce((n, g) => n + (g.visible ? 1 : 0), 0),
     meshes: pool.length,
     inWorldGroups: group ? world.groups.includes(group) : null,
+    yields,
+    minClearance: Number.isFinite(minClearance) ? minClearance : null,
     sample,
   };
 }

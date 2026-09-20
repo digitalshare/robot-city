@@ -366,6 +366,14 @@ export function initRobots({ api, toast }) {
     if (r && !r.ok && r.reason !== 'no-space') toast('That robot has no home building any more.');
   });
 
+  document.querySelector('#rb-pov').addEventListener('click', () => {
+    if (selected?.kind !== 'robot') return;
+    const id = selected.id;
+    close();
+    const result = api.firstPersonRobot(id);
+    if (!result?.ok) toast('That robot is not available for first-person view.');
+  });
+
   document.querySelector('#rb-deploy').addEventListener('click', () => {
     if (selected?.kind !== 'type') return;
     const modelId = selected.id;

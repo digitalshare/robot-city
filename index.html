@@ -191,6 +191,7 @@
               </div>
               <p id="rb-status" class="muted rb-status"></p>
               <div class="rb-actions">
+                <button id="rb-pov" type="button" class="btn-primary">First-person view</button>
                 <button id="rb-focus" type="button" class="btn-primary">Focus</button>
                 <button id="rb-save" type="button" class="btn-ghost">Save</button>
                 <button id="rb-remove" type="button" class="btn-ghost">Remove</button>
@@ -425,6 +426,15 @@
     <span id="interior-type"></span>
     <span id="interior-hint" class="muted">Drag to orbit · Drag an object to move it · Esc to leave</span>
     <button id="interior-back" type="button">Back to town</button>
+  </div>
+
+  <div id="pov-bar" class="hidden" role="status" aria-live="polite">
+    <span class="pov-live" aria-hidden="true"></span>
+    <b>First-person</b>
+    <span id="pov-robot"></span>
+    <span id="pov-location" class="muted"></span>
+    <span class="pov-hint muted">Following heading · Esc to exit</span>
+    <button id="pov-exit" type="button">Exit view</button>
   </div>
 
   <div id="tooltip" class="hidden"></div>

@@ -16,13 +16,15 @@ import { defaultSpaceSpec } from './town/spaces.js';
 import {
   buildInterior, updateRobots, disposeInterior,
   addObject, removeObject, replaceObject, moveObject, objectGroup, freeSpotFor,
-  addRobotMesh, removeRobotMesh, replaceRobotMesh,
+  addRobotMesh, removeRobotMesh, replaceRobotMesh, interiorRobotView, interiorCollisionStats,
 } from './town/interior.js';
 import {
-  robotById, robotsOf, robotSummary, robotKey, seedCrews, onDuty,
+  robotById, robotsOf, robotSummary, robotMetrics, robotRadius, robotKey, seedCrews, onDuty,
   deployRobot, updateRobot, removeRobot,
 } from './town/robots.js';
-import { initCrowd, updateCrowd, syncCrowd, crowdStats, crowdRobotPos, pickCrowdRobot } from './town/crowd.js';
+import {
+  initCrowd, updateCrowd, syncCrowd, crowdStats, crowdRobotPos, crowdRobotView, pickCrowdRobot,
+} from './town/crowd.js';
 import {
   typeById, resolveParts, objectMetrics, objectRadius, effectiveAttrs,
   instanceFromType, instanceFromSpec, instanceFromItem, OBJ_SCALE_MIN, OBJ_SCALE_MAX,
@@ -138,6 +140,7 @@ function flyTo(id) {
 }
 
 function zoomBy(f) {
+  if (pov) return;
   const offset = camera.position.clone().sub(controls.target);
   const len = THREE.MathUtils.clamp(offset.length() * f, controls.minDistance, controls.maxDistance);
   camera.position.copy(controls.target).add(offset.setLength(len));
@@ -377,6 +380,7 @@ function mountInterior(id) {
 }
 
 function exitInterior() {
+  if (pov) exitRobotPov();
   if (mode !== 'interior') return false;
   selectObject(null);
   drag = null;
@@ -400,6 +404,7 @@ function exitInterior() {
 }
 
 function enterInterior(id) {
+  if (pov) exitRobotPov();
   const def = defById(id);
   if (!def) return { ok: false, reason: 'unknown-building' };
   if (placing) setPlacing(false);
@@ -564,6 +569,16 @@ function pickObjectId() {
   return o ? o.userData.objectId : null;
 }
 
+function pickInteriorRobotId() {
+  if (!interior) return null;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(interior.robots.map((r) => r.mesh), true);
+  if (!hits.length) return null;
+  let o = hits[0].object;
+  while (o && !o.userData.robotId) o = o.parent;
+  return o ? o.userData.robotId : null;
+}
+
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const floorHit = new THREE.Vector3();
 
@@ -635,6 +650,7 @@ function deployRobotInto(modelId, homeId) {
 }
 
 function saveRobot(id, patch) {
+  if (pov?.id === id) exitRobotPov();
   const before = robotById(id);
   if (!before) return null;
   const from = before.home;
@@ -647,6 +663,7 @@ function saveRobot(id, patch) {
 }
 
 function dropRobot(id) {
+  if (pov?.id === id) exitRobotPov();
   const rec = robotById(id);
   if (!rec || !removeRobot(id)) return false;
   syncRoomCrew(rec.home);
@@ -658,6 +675,120 @@ function dropRobot(id) {
 function focusRobot(id) {
   const rec = robotById(id);
   return rec ? enterInterior(rec.home) : null;
+}
+
+// ---- robot first-person view ----
+
+let pov = null;
+const povDirection = new THREE.Vector3();
+
+function cloneTownCam(value) {
+  return value ? {
+    pos: value.pos.clone(),
+    target: value.target.clone(),
+    autoRotate: value.autoRotate,
+  } : null;
+}
+
+function robotLocation(rec) {
+  const space = spaceOf(rec.home);
+  const indoors = !!space && onDuty(robotsOf(rec.home), space.spec).some((r) => r.id === rec.id);
+  return { mode: indoors ? 'interior' : 'town', space };
+}
+
+function firstPersonRobot(id) {
+  const rec = robotById(id);
+  if (!rec) return { ok: false, reason: 'unknown-robot' };
+  if (pov) exitRobotPov();
+  if (placing) setPlacing(false);
+  selectObject(null);
+
+  const target = robotLocation(rec);
+  const saved = {
+    mode,
+    interiorId,
+    townCam: cloneTownCam(townCam),
+    pos: camera.position.clone(),
+    target: controls.target.clone(),
+    enabled: controls.enabled,
+    autoRotate: controls.autoRotate,
+    minDistance: controls.minDistance,
+    maxDistance: controls.maxDistance,
+    maxPolarAngle: controls.maxPolarAngle,
+    near: camera.near,
+  };
+
+  if (target.mode === 'interior' && (mode !== 'interior' || interiorId !== rec.home)) {
+    if (mode === 'interior') exitInterior();
+    if (!mountInterior(rec.home)) return { ok: false, reason: 'no-space' };
+  } else if (target.mode === 'town' && mode === 'interior') {
+    exitInterior();
+  }
+
+  tween = null;
+  controls.enabled = false;
+  controls.autoRotate = false;
+  camera.near = 0.08;
+  camera.updateProjectionMatrix();
+  renderer.domElement.style.cursor = 'default';
+  setHovered(null);
+  pov = { id, location: target.mode, saved };
+  ui.closeDialogs();
+  ui.setPov(robotSummary(rec), target.mode === 'interior');
+  updatePovCamera();
+  return { ok: true, id, location: target.mode };
+}
+
+function exitRobotPov() {
+  if (!pov) return false;
+  const { saved } = pov;
+  pov = null;
+
+  if (saved.mode === 'town') {
+    if (mode === 'interior') exitInterior();
+  } else if (saved.interiorId && (mode !== 'interior' || interiorId !== saved.interiorId)) {
+    if (mode === 'interior') exitInterior();
+    mountInterior(saved.interiorId);
+  }
+
+  townCam = cloneTownCam(saved.townCam);
+  camera.position.copy(saved.pos);
+  controls.target.copy(saved.target);
+  controls.enabled = saved.enabled;
+  controls.autoRotate = saved.autoRotate;
+  controls.minDistance = saved.minDistance;
+  controls.maxDistance = saved.maxDistance;
+  controls.maxPolarAngle = saved.maxPolarAngle;
+  camera.near = saved.near;
+  camera.updateProjectionMatrix();
+  camera.lookAt(controls.target);
+  renderer.domElement.style.cursor = 'grab';
+  ui.setPov(null);
+  ui.setMode(mode, mode === 'interior' ? defById(interiorId) : null);
+  return true;
+}
+
+function updatePovCamera() {
+  if (!pov) return true;
+  const rec = robotById(pov.id);
+  const pose = pov.location === 'interior'
+    ? interiorRobotView(interior, pov.id)
+    : crowdRobotView(pov.id);
+  if (!rec || !pose) {
+    exitRobotPov();
+    return false;
+  }
+  const metrics = robotMetrics(rec);
+  const forward = robotRadius(rec) + 0.05;
+  povDirection.set(Math.sin(pose.rot), 0, Math.cos(pose.rot));
+  camera.position.set(
+    pose.x + povDirection.x * forward,
+    pose.y + Math.max(0.38, metrics.height * 0.72),
+    pose.z + povDirection.z * forward
+  );
+  controls.target.copy(camera.position).addScaledVector(povDirection, 3);
+  camera.lookAt(controls.target);
+  return true;
 }
 
 // the record plus where it is standing right now: meshed in the room the camera is in, or out on
@@ -736,6 +867,8 @@ const ui = initUI({
   saveRobot,
   dropRobot,
   focusRobot,
+  firstPersonRobot,
+  exitRobotPov,
   // the whole standing room as plain data: what a /space redesign is sent as its reference
   spaceState: (id) => {
     const s = spaceOf(id);
@@ -861,9 +994,11 @@ function updateHover() {
 let downAt = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   downAt = { x: e.clientX, y: e.clientY };
+  if (pov) return;
   if (mode !== 'interior' || !interior || e.button !== 0) return;
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+  if (pickInteriorRobotId()) return;
   const id = pickObjectId();
   if (!id) return;
   // Suspending the orbit in this same event is what keeps a drag from becoming a camera rotate:
@@ -891,6 +1026,12 @@ renderer.domElement.addEventListener('click', (e) => {
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
   pointerActive = true;
+  if (pov) return;
+  if (mode === 'interior') {
+    const rid = pickInteriorRobotId();
+    if (rid) ui.openRobot(rid);
+    return;
+  }
   if (mode !== 'town') return;
 
   if (!placing) {
@@ -920,7 +1061,7 @@ renderer.domElement.addEventListener('click', (e) => {
 });
 
 renderer.domElement.addEventListener('dblclick', (e) => {
-  if (placing || mode !== 'town') return;
+  if (pov || placing || mode !== 'town') return;
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
@@ -937,7 +1078,8 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (ui.isFunctionsOpen()) ui.hideFunctionsPanel();
+  if (pov) exitRobotPov();
+  else if (ui.isFunctionsOpen()) ui.hideFunctionsPanel();
   else if (ui.isRobotsOpen()) ui.hideRobotsPanel();
   else if (ui.isDialogOpen()) ui.closeDialogs();
   else if (placing) setPlacing(false);
@@ -966,14 +1108,15 @@ function tick(now) {
       tween = null;
       controls.enabled = true;
     }
-  } else {
+  } else if (!pov) {
     controls.update();
   }
 
   if (mode === 'interior') {
     clampInteriorTarget();
     updateRobots(interior, dt, now);
-    renderer.render(interior.scene, camera);
+    if (pov) updatePovCamera();
+    renderer.render(mode === 'interior' ? interior.scene : scene, camera);
     return;
   }
 
@@ -987,7 +1130,12 @@ function tick(now) {
 
   // the interior branch returned above, so the street crowd is the only walkers running here
   updateCrowd(dt, now, camera);
+  if (pov) updatePovCamera();
 
+  if (pov) {
+    renderer.render(mode === 'interior' ? interior.scene : scene, camera);
+    return;
+  }
   if (placing) updatePlacing();
   else updateHover();
 
@@ -1047,6 +1195,15 @@ window.__robotTown = {
   sectors: () => world.sectors.map((s) => ({ id: s.id, name: s.name, offset: s.offset })),
   robots: () => world.robots.map(robotSummary),
   robot: robotState,
+  firstPersonRobot,
+  exitRobotPov,
+  pov: () => (pov ? {
+    id: pov.id,
+    location: pov.location,
+    controlsEnabled: controls.enabled,
+    camera: camera.position.toArray(),
+    target: controls.target.toArray(),
+  } : null),
   crowd: crowdStats,
   rebuildInterior,
   bounds,
@@ -1106,7 +1263,14 @@ window.__robotTown = {
     pointer.y = -(clientY / innerHeight) * 2 + 1;
     return pickObjectId();
   },
+  robotAt(clientX, clientY) {
+    if (mode !== 'interior') return null;
+    pointer.x = (clientX / innerWidth) * 2 - 1;
+    pointer.y = -(clientY / innerHeight) * 2 + 1;
+    return pickInteriorRobotId();
+  },
   robotPositions: () => (interior ? interior.robots.map((r) => [r.x, r.z]) : []),
+  interiorCollisions: () => interiorCollisionStats(interior),
   enterInterior,
   exitInterior,
 };

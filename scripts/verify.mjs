@@ -1522,6 +1522,24 @@ if (!(await page.isHidden('#space-prompt'))) {
 }
 const rbRoom = await page.evaluate(() => window.__robotTown.interior());
 
+const rbIndoorClickAim = await page.evaluate(() => {
+  const id = window.__robotTown.interior()?.robotIds[0] ?? null;
+  const robot = id ? window.__robotTown.robot(id) : null;
+  if (!robot?.pos) return null;
+  const point = window.__robotTown.screenPoint(robot.pos[0], robot.pos[1], 0.8);
+  return { id, ...point, picked: window.__robotTown.robotAt(point.x, point.y) };
+});
+if (rbIndoorClickAim?.picked === rbIndoorClickAim.id) {
+  await page.mouse.click(rbIndoorClickAim.x, rbIndoorClickAim.y);
+  await page.waitForTimeout(250);
+}
+const rbIndoorClick = await page.evaluate((aim) => ({
+  aimed: aim?.id ?? null,
+  picked: aim?.picked ?? null,
+  panel: !document.querySelector('#robot-panel').classList.contains('hidden'),
+  selected: document.querySelector('#rb-list .rb-row[aria-current="true"]')?.dataset.robot ?? null,
+}), rbIndoorClickAim);
+
 await page.click('[data-view="robots"]');
 await page.waitForTimeout(600);
 const editId = rbRoom?.robotIds[0] ?? null;
@@ -1565,6 +1583,7 @@ const rbEdit = await page.evaluate((id) => {
     pose: window.__robotTown.cameraPose(),
   };
 }, editId);
+const rbRoomCollision = await page.evaluate(() => window.__robotTown.interiorCollisions());
 
 // the library row deploys into the room the camera is standing in
 await page.click('#rb-types .rb-type-row[data-type="courier"]');
@@ -1679,10 +1698,57 @@ const crowdB = await page.evaluate(() => window.__robotTown.crowd());
 const rbCrowd = {
   total: crowdA.total, visible: crowdA.visible, meshes: crowdA.meshes,
   inWorldGroups: crowdA.inWorldGroups,
+  yields: crowdB.yields,
+  minClearance: crowdB.minClearance,
   moved: JSON.stringify(crowdA.sample) !== JSON.stringify(crowdB.sample),
   sample: crowdA.sample.slice(0, 2),
 };
 await page.screenshot({ path: path.join(shots, '18-crowd.png') });
+
+// First-person view follows simulation data rather than requiring one of the limited crowd meshes.
+const rbStreetPovId = await page.evaluate(() =>
+  window.__robotTown.robots().find((r) => r.home === 'hospital')?.id ?? null);
+const rbStreetBefore = await page.evaluate(() => window.__robotTown.cameraPose());
+await page.click('[data-view="robots"]');
+await page.waitForTimeout(400);
+await page.click(`#rb-list .rb-row[data-robot="${rbStreetPovId}"]`);
+const rbPovButton = await page.isVisible('#rb-pov');
+await page.click('#rb-pov');
+await page.waitForTimeout(450);
+const rbStreetPovA = await page.evaluate(() => ({
+  pov: window.__robotTown.pov(),
+  overlay: !document.querySelector('#pov-bar').classList.contains('hidden'),
+  panelHidden: document.querySelector('#robot-panel').classList.contains('hidden'),
+}));
+await page.waitForTimeout(700);
+const rbStreetPovB = await page.evaluate(() => window.__robotTown.pov());
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
+const rbStreetPovExit = await page.evaluate(() => ({
+  pov: window.__robotTown.pov(),
+  overlayHidden: document.querySelector('#pov-bar').classList.contains('hidden'),
+  pose: window.__robotTown.cameraPose(),
+}));
+
+// A robot on duty mounts its cached room and restores the previous town view on exit.
+const rbIndoorBefore = await page.evaluate(() => window.__robotTown.cameraPose());
+await page.click('[data-view="robots"]');
+await page.waitForTimeout(400);
+await page.click(`#rb-list .rb-row[data-robot="${editId}"]`);
+await page.click('#rb-pov');
+await page.waitForTimeout(600);
+const rbIndoorPov = await page.evaluate(() => ({
+  pov: window.__robotTown.pov(),
+  interior: window.__robotTown.interior(),
+  overlay: !document.querySelector('#pov-bar').classList.contains('hidden'),
+}));
+await page.click('#pov-exit');
+await page.waitForTimeout(250);
+const rbIndoorPovExit = await page.evaluate(() => ({
+  pov: window.__robotTown.pov(),
+  interior: window.__robotTown.interior(),
+  pose: window.__robotTown.cameraPose(),
+}));
 
 // the edit is roster data, so a room rebuilt from scratch has to reproduce it
 await page.evaluate(() => window.__robotTown.rebuildInterior('city-hall'));
@@ -1706,7 +1772,7 @@ console.log('ROBOTS:', JSON.stringify({
   rbOpen: { ...rbOpen, later: rbOpen.later.slice(0, 30) },
   rbSearch: { q: rbRoster0[0].name, narrow: rbSearchNarrow, none: rbSearchNone, cleared: rbSearchCleared },
   rbSelect: { ...rbSelect, status: rbSelect.status.slice(0, 80) },
-  rbClosed, rbRoom,
+  rbClosed, rbRoom, rbIndoorClick, rbRoomCollision,
   rbDirty,
   rbEdit: {
     ...rbEdit,
@@ -1719,7 +1785,10 @@ console.log('ROBOTS:', JSON.stringify({
   rbUni, rbFocusPrompt: { ...rbFocusPrompt, interior: rbFocusPrompt.interior?.id ?? null },
   rbFocus,
   rbEscOpen, rbEscape, rbEscTwice,
-  rbCrowd, rbPersist,
+  rbCrowd,
+  rbPov: { button: rbPovButton, streetA: rbStreetPovA, streetB: rbStreetPovB,
+    streetExit: rbStreetPovExit, indoor: rbIndoorPov, indoorExit: rbIndoorPovExit },
+  rbPersist,
 }));
 
 // ---------- page dialogs: town overview / buildings / objects / settings ----------
@@ -2292,6 +2361,9 @@ const robotsOk =
   /part/.test(rbSelect.status) &&
   rbClosed && rbRoom !== null && rbRoom.id === 'city-hall' &&
   rbRoom.robots >= 3 && rbRoom.robots <= 5 && rbRoom.robotIds.length === rbRoom.robots &&
+  rbRoomCollision?.robots === rbRoom.robots && rbRoomCollision.minClearance >= 0 &&
+  rbIndoorClick.aimed !== null && rbIndoorClick.picked === rbIndoorClick.aimed &&
+  rbIndoorClick.panel && rbIndoorClick.selected === rbIndoorClick.aimed &&
   editId !== null &&
   rbDirty.head === 'Verify Bot' && rbDirty.sizeOut === '1.50' && rbDirty.speedOut === '2.5' &&
   rbEdit.rec.name === 'Verify Bot' && rbEdit.rec.color === '#ff8800' &&
@@ -2325,7 +2397,19 @@ const robotsOk =
   rbFocus.rec.home === 'university' && rbFocus.rec.indoors === true && rbFocus.inRoom === true &&
   rbEscOpen && rbEscape.dialog && rbEscape.interior === 'university' && rbEscTwice === null &&
   rbCrowd.total === rbRoster0.length && rbCrowd.visible > 0 && rbCrowd.meshes > 0 &&
-  rbCrowd.inWorldGroups === false && rbCrowd.moved &&
+  rbCrowd.inWorldGroups === false && rbCrowd.moved && rbCrowd.yields > 0 && rbCrowd.minClearance >= 0 &&
+  rbPovButton && rbStreetPovId !== null &&
+  rbStreetPovA.pov?.id === rbStreetPovId && rbStreetPovA.pov.location === 'town' &&
+  rbStreetPovA.pov.controlsEnabled === false && rbStreetPovA.overlay && rbStreetPovA.panelHidden &&
+  rbStreetPovB?.id === rbStreetPovId &&
+  JSON.stringify(rbStreetPovA.pov.camera) !== JSON.stringify(rbStreetPovB.camera) &&
+  rbStreetPovExit.pov === null && rbStreetPovExit.overlayHidden &&
+  ['p', 't'].every((k) => rbStreetPovExit.pose[k].every((v, i) => Math.abs(v - rbStreetBefore[k][i]) < 0.5)) &&
+  rbIndoorPov.pov?.id === editId && rbIndoorPov.pov.location === 'interior' &&
+  rbIndoorPov.pov.controlsEnabled === false && rbIndoorPov.overlay &&
+  rbIndoorPov.interior?.id === 'city-hall' && rbIndoorPov.interior.robotIds.includes(editId) &&
+  rbIndoorPovExit.pov === null && rbIndoorPovExit.interior === null &&
+  ['p', 't'].every((k) => rbIndoorPovExit.pose[k].every((v, i) => Math.abs(v - rbIndoorBefore[k][i]) < 0.5)) &&
   rbPersist.interior.id === 'city-hall' && rbPersist.interior.has === true &&
   rbPersist.rec.name === 'Verify Bot' && rbPersist.rec.color === '#ff8800' &&
   rbPersist.rec.scale === 1.5 && rbPersist.rec.speed === 2.5 &&

@@ -65,8 +65,9 @@ function robotGroup(rec) {
 
 export function addRobotMesh(built, rec, at = null) {
   const extra = extraFor(robotRadius(rec));
-  const start = at || freeSpot(built.room, built.blockers, extra);
-  const next = freeSpot(built.room, built.blockers, extra, start);
+  const radius = robotRadius(rec);
+  const start = at || freeSpot(built.room, built.blockers, extra, null, built.robots, radius);
+  const next = freeSpot(built.room, built.blockers, extra, start, built.robots, radius);
   const robot = {
     id: rec.id,
     key: robotKey(rec),
@@ -77,8 +78,9 @@ export function addRobotMesh(built, rec, at = null) {
     tz: next.z,
     speed: rec.speed ?? 1.5,
     scale: rec.scale ?? 1,
-    radius: robotRadius(rec),
+    radius,
     phase: Math.random() * Math.PI * 2,
+    avoids: 0,
   };
   built.scene.add(robot.mesh);
   built.robots.push(robot);
@@ -121,14 +123,24 @@ function blocked(x, z, room, blockers, extra = 0) {
   return false;
 }
 
-function freeSpot(room, blockers, extra = 0, fallback = null) {
+function blockedByRobot(x, z, radius, robots, self = null, padding = 0.12) {
+  for (const other of robots) {
+    if (other === self) continue;
+    const space = radius + other.radius + padding;
+    if ((x - other.x) ** 2 + (z - other.z) ** 2 < space * space) return true;
+  }
+  return false;
+}
+
+function freeSpot(room, blockers, extra = 0, fallback = null, robots = [], radius = ROBOT_R, self = null) {
   const bx = room.hw - 0.7 - extra;
   const bz = room.hd - 0.7 - extra;
   if (bx > 0 && bz > 0) {
     for (let i = 0; i < 40; i++) {
       const x = (Math.random() * 2 - 1) * bx;
       const z = (Math.random() * 2 - 1) * bz;
-      if (!blocked(x, z, room, blockers, extra)) return { x, z };
+      if (!blocked(x, z, room, blockers, extra) &&
+          !blockedByRobot(x, z, radius, robots, self, 0.3)) return { x, z };
     }
   }
   // a robot too big for the gaps left holds where it is rather than snapping to the room centre
@@ -290,9 +302,27 @@ export function updateRobots(built, dt, now) {
     let dz = r.tz - r.z;
     let dist = Math.hypot(dx, dz);
     if (dist < 0.3) {
-      const next = freeSpot(room, blockers, extra, r);
+      const next = freeSpot(room, blockers, extra, r, robots, r.radius, r);
       r.tx = next.x;
       r.tz = next.z;
+      dx = r.tx - r.x;
+      dz = r.tz - r.z;
+      dist = Math.hypot(dx, dz) || 1;
+    }
+
+    // Look farther than this frame's movement so the robot turns before its shell reaches an
+    // obstacle. Other robots use their real footprint, while furniture keeps its tuned blocker.
+    const ux = dx / dist;
+    const uz = dz / dist;
+    const look = Math.min(dist, Math.max(r.radius * 2.4, r.speed * 0.45));
+    const px = r.x + ux * look;
+    const pz = r.z + uz * look;
+    if (blocked(px, pz, room, blockers, extra) ||
+        blockedByRobot(px, pz, r.radius, robots, r, 0.28)) {
+      const next = freeSpot(room, blockers, extra, r, robots, r.radius, r);
+      r.tx = next.x;
+      r.tz = next.z;
+      r.avoids++;
       dx = r.tx - r.x;
       dz = r.tz - r.z;
       dist = Math.hypot(dx, dz) || 1;
@@ -300,10 +330,12 @@ export function updateRobots(built, dt, now) {
     const step = Math.min(dist, r.speed * dt);
     const nx = r.x + (dx / dist) * step;
     const nz = r.z + (dz / dist) * step;
-    if (blocked(nx, nz, room, blockers, extra)) {
-      const next = freeSpot(room, blockers, extra, r);
+    if (blocked(nx, nz, room, blockers, extra) ||
+        blockedByRobot(nx, nz, r.radius, robots, r)) {
+      const next = freeSpot(room, blockers, extra, r, robots, r.radius, r);
       r.tx = next.x;
       r.tz = next.z;
+      r.avoids++;
     } else {
       r.x = nx;
       r.z = nz;
@@ -311,6 +343,42 @@ export function updateRobots(built, dt, now) {
     r.mesh.position.set(r.x, 0.03 + Math.sin(now * 0.006 + r.phase) * 0.05 * r.scale, r.z);
     r.mesh.rotation.y = Math.atan2(dx, dz);
   }
+}
+
+export function interiorCollisionStats(built) {
+  if (!built) return null;
+  let minClearance = Infinity;
+  let avoids = 0;
+  for (let i = 0; i < built.robots.length; i++) {
+    const r = built.robots[i];
+    avoids += r.avoids;
+    const extra = extraFor(r.radius);
+    for (const b of built.blockers) {
+      minClearance = Math.min(minClearance, Math.hypot(r.x - b.x, r.z - b.z) - b.r - extra);
+    }
+    for (let j = i + 1; j < built.robots.length; j++) {
+      const other = built.robots[j];
+      minClearance = Math.min(
+        minClearance,
+        Math.hypot(r.x - other.x, r.z - other.z) - r.radius - other.radius
+      );
+    }
+  }
+  return {
+    robots: built.robots.length,
+    avoids,
+    minClearance: Number.isFinite(minClearance) ? minClearance : null,
+  };
+}
+
+export function interiorRobotView(built, id) {
+  const r = built?.robots.find((robot) => robot.id === id);
+  return r ? {
+    x: r.mesh.position.x,
+    y: r.mesh.position.y,
+    z: r.mesh.position.z,
+    rot: r.mesh.rotation.y,
+  } : null;
 }
 
 export function disposeInterior(built) {
