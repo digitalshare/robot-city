@@ -2,6 +2,7 @@ const PREFIX = '/__robot-chat';
 const MAX_BODY = 64 * 1024;
 const MAX_MESSAGE = 2000;
 const MAX_MEMORY = 8000;
+const COGNEE_DATASET = 'robot-city';
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -56,7 +57,7 @@ async function recall(robotId, query) {
   return jsonFetch(`${base}/api/v1/recall`, {
     method: 'POST',
     headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, session_id: robotId }),
+    body: JSON.stringify({ query, dataset_name: COGNEE_DATASET, session_id: robotId }),
   });
 }
 
@@ -68,7 +69,7 @@ async function remember(robotId, question, answer) {
     headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       entry: { type: 'qa', question, answer },
-      dataset_name: process.env.COGNEE_DATASET || 'robot-city',
+      dataset_name: COGNEE_DATASET,
       session_id: robotId,
     }),
   });

@@ -20,6 +20,7 @@ load_dotenv()
 
 app = FastAPI(title="Robot City Agent Service", version="0.1.0")
 MAX_MEMORY = 8_000
+COGNEE_DATASET = "robot-city"
 
 
 class Robot(BaseModel):
@@ -73,6 +74,7 @@ async def recall(robot_id: str, message: str) -> str:
         "recall",
         {
             "query": f"[private memory scope: {key}] {message}",
+            "dataset_name": COGNEE_DATASET,
             "session_id": key,
         },
     )
@@ -89,7 +91,7 @@ async def remember(robot_id: str, question: str, answer: str) -> None:
                 "question": f"[private memory scope: {key}] {question}",
                 "answer": answer,
             },
-            "dataset_name": os.getenv("COGNEE_DATASET", "robot-city"),
+            "dataset_name": COGNEE_DATASET,
             "session_id": key,
         },
     )
