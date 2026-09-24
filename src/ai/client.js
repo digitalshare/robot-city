@@ -1,4 +1,5 @@
-const CAN_PROXY = import.meta.env.DEV;
+const CAN_PROXY = import.meta.env.DEV ||
+  location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const PROXY_PREFIX = '/__ai-proxy';
 
 class NetError extends Error {}

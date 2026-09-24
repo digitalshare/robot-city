@@ -167,10 +167,65 @@ export function robotKey(rec) {
 
 let seq = 0;
 const seeded = new Set();
+const ROSTER_KEY = 'robotTown.robots.v1';
 
 function identity() {
   const n = ++seq;
   return { id: `rb-${n}`, name: `${ROBOT_NAMES[(n - 1) % ROBOT_NAMES.length]}-${String(n).padStart(2, '0')}` };
+}
+
+function saveRoster() {
+  try {
+    localStorage.setItem(ROSTER_KEY, JSON.stringify(world.robots.map((r) => ({
+      id: r.id,
+      name: r.name,
+      modelId: r.modelId,
+      color: r.color,
+      scale: r.scale,
+      speed: r.speed,
+      home: r.home,
+      source: r.source,
+      agentKey: r.agentKey || `robot:${r.id}`,
+    }))));
+  } catch {
+    // Persistence is an enhancement; the in-memory roster remains authoritative for this session.
+  }
+}
+
+export function persistRoster() {
+  saveRoster();
+}
+
+export function restoreRoster() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(ROSTER_KEY) || 'null'); } catch { saved = null; }
+  if (!Array.isArray(saved)) return false;
+  const buildings = new Set(world.buildings.map((b) => b.id));
+  const current = new Map(world.robots.map((r) => [r.id, r]));
+  const restored = [];
+  for (const item of saved) {
+    if (!item || !buildings.has(item.home) || !robotTypeById(item.modelId)) continue;
+    const base = current.get(item.id);
+    const rec = base || {
+      id: String(item.id),
+      name: String(item.name || item.id),
+      modelId: item.modelId,
+      color: item.color,
+      scale: 1,
+      speed: robotTypeById(item.modelId).speed,
+      home: item.home,
+      source: item.source === 'deploy' ? 'deploy' : 'seed',
+      agentKey: `robot:${item.id}`,
+    };
+    Object.assign(rec, item, { agentKey: item.agentKey || `robot:${item.id}` });
+    restored.push(rec);
+    if (rec.source === 'seed') seeded.add(rec.home);
+    const n = Number(String(rec.id).match(/^rb-(\d+)$/)?.[1] || 0);
+    seq = Math.max(seq, n);
+  }
+  if (!restored.length) return false;
+  world.robots.splice(0, world.robots.length, ...restored);
+  return true;
 }
 
 export function robotById(id) {
@@ -202,6 +257,7 @@ function seedRobot(def, i) {
     speed: Math.round(type.speed * (0.85 + rand() * 0.3) * 10) / 10,
     home: def.id,
     source: 'seed',
+    agentKey: `robot:${id}`,
   };
   world.robots.push(rec);
   return rec;
@@ -227,8 +283,10 @@ export function deployRobot(modelId, homeId) {
   const rec = {
     id, name, modelId: type.id, color: type.color,
     scale: 1, speed: type.speed, home: homeId, source: 'deploy',
+    agentKey: `robot:${id}`,
   };
   world.robots.push(rec);
+  saveRoster();
   return rec;
 }
 
@@ -251,6 +309,7 @@ export function updateRobot(id, patch) {
     if (Number.isFinite(s)) rec.speed = round(clamp(s, SPEED_MIN, SPEED_MAX));
   }
   if (patch.home !== undefined && world.buildings.some((b) => b.id === patch.home)) rec.home = patch.home;
+  saveRoster();
   return rec;
 }
 
@@ -258,6 +317,7 @@ export function removeRobot(id) {
   const i = world.robots.findIndex((r) => r.id === id);
   if (i < 0) return false;
   world.robots.splice(i, 1);
+  saveRoster();
   return true;
 }
 
@@ -285,6 +345,7 @@ export function robotSummary(rec) {
     scale: rec.scale,
     speed: rec.speed,
     source: rec.source,
+    agentKey: rec.agentKey || `robot:${rec.id}`,
     home: rec.home,
     homeName: home?.name ?? '(nowhere)',
     parts: type?.parts.length ?? 0,

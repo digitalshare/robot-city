@@ -196,6 +196,18 @@
                 <button id="rb-save" type="button" class="btn-ghost">Save</button>
                 <button id="rb-remove" type="button" class="btn-ghost">Remove</button>
               </div>
+              <section id="rb-chat" class="rb-chat" aria-label="Private robot chat">
+                <div class="rb-chat-head">
+                  <b>Private chat</b>
+                  <span id="rb-chat-status" class="muted">Memory-backed</span>
+                </div>
+                <div id="rb-chat-messages" class="rb-chat-messages"></div>
+                <form id="rb-chat-form" class="rb-chat-form">
+                  <textarea id="rb-chat-input" rows="2" maxlength="2000" placeholder="Talk to this robot…"></textarea>
+                  <button id="rb-chat-send" type="submit" class="btn-primary">Send</button>
+                </form>
+              </section>
+              </div>
             </div>
             <div id="rb-type-item" class="rb-block hidden">
               <h3 id="rb-type-name" class="rb-item-h">Model</h3>

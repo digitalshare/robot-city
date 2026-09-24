@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { chatWithRobot } from '../ai/robotAgent.js';
 import { world, disposeGroup } from '../town/world.js';
 import { buildParts } from '../town/custom.js';
 import { OBJ_SCALE_MIN, OBJ_SCALE_MAX } from '../town/objects.js';
@@ -32,6 +33,11 @@ export function initRobots({ api, toast }) {
   const speedVal = document.querySelector('#rb-speed-val');
   const homeEl = document.querySelector('#rb-home');
   const statusEl = document.querySelector('#rb-status');
+  const chatMessagesEl = document.querySelector('#rb-chat-messages');
+  const chatForm = document.querySelector('#rb-chat-form');
+  const chatInput = document.querySelector('#rb-chat-input');
+  const chatSend = document.querySelector('#rb-chat-send');
+  const chatStatus = document.querySelector('#rb-chat-status');
 
   const typeNameEl = document.querySelector('#rb-type-name');
   const typeDescEl = document.querySelector('#rb-type-desc');
@@ -42,6 +48,25 @@ export function initRobots({ api, toast }) {
   const previewNote = document.querySelector('#rb-preview-note');
 
   let selected = null;
+  let chatPending = false;
+  let chatRobotId = null;
+
+  function addChatBubble(kind, text) {
+    const el = document.createElement('div');
+    el.className = `rb-chat-msg ${kind}`;
+    el.textContent = text;
+    chatMessagesEl.appendChild(el);
+    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  }
+
+  function resetChat(robot) {
+    chatRobotId = robot?.id || null;
+    chatMessagesEl.replaceChildren();
+    chatInput.value = '';
+    chatStatus.textContent = robot ? 'Private memory · Cognee' : 'Select a robot';
+    chatInput.disabled = !robot;
+    chatSend.disabled = !robot;
+  }
 
   // ---- the two lists ----
 
@@ -163,6 +188,7 @@ export function initRobots({ api, toast }) {
     speedVal.textContent = r.speed.toFixed(1);
     fillHomes(homeEl, r.home);
     statusEl.textContent = statusText(r);
+    if (chatRobotId !== r.id) resetChat(r);
     show('item');
     setPreview(r.modelId, r.color, r.scale);
   }
@@ -326,6 +352,32 @@ export function initRobots({ api, toast }) {
     speedVal.textContent = Number(speedEl.value || 0).toFixed(1);
   });
 
+  chatForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (chatPending || selected?.kind !== 'robot') return;
+    const text = chatInput.value.trim();
+    const robot = api.robot(selected.id);
+    if (!text || !robot) return;
+    chatPending = true;
+    chatInput.value = '';
+    addChatBubble('user', text);
+    chatStatus.textContent = 'Thinking…';
+    chatSend.disabled = true;
+    chatInput.disabled = true;
+    const result = await chatWithRobot(robot, text);
+    if (result.ok) {
+      addChatBubble('assistant', result.reply);
+      chatStatus.textContent = 'Private memory · Cognee';
+    } else {
+      addChatBubble('error', result.message);
+      chatStatus.textContent = 'Memory service unavailable';
+    }
+    chatPending = false;
+    chatInput.disabled = false;
+    chatSend.disabled = false;
+    chatInput.focus();
+  });
+
   document.querySelector('#rb-save').addEventListener('click', () => {
     if (selected?.kind !== 'robot') return;
     const rec = api.saveRobot(selected.id, {
@@ -351,6 +403,7 @@ export function initRobots({ api, toast }) {
     if (!api.dropRobot(selected.id)) return;
     selected = null;
     stopPreview();
+    resetChat(null);
     show('none');
     renderList();
     toast(`${name} removed from the roster.`);

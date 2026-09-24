@@ -20,7 +20,7 @@ import {
 } from './town/interior.js';
 import {
   robotById, robotsOf, robotSummary, robotMetrics, robotRadius, robotKey, seedCrews, onDuty,
-  deployRobot, updateRobot, removeRobot,
+  persistRoster, restoreRoster, deployRobot, updateRobot, removeRobot,
 } from './town/robots.js';
 import {
   initCrowd, updateCrowd, syncCrowd, crowdStats, crowdRobotPos, crowdRobotView, pickCrowdRobot,
@@ -88,8 +88,11 @@ let vegetation = buildVegetation(scene);
 buildProps(scene);
 
 // Every building staffs a crew, and the crew that is not on duty inside a room walks the streets.
+// Restore saved robot identities before seeding so a project restart keeps each robot's agent key.
+restoreRoster();
 // seedCrews must run before initCrowd, which reads the roster it just filled.
 seedCrews(world.buildings);
+persistRoster();
 initCrowd(scene);
 
 // Everything that was a hard-coded number for the core island is derived from reach(),
@@ -173,6 +176,7 @@ function expandMap() {
   buildSectorVegetation(scene, sector, index);
 
   seedCrews(defs);
+  persistRoster();
   syncCrowd();
   applyScale();
   notify();
