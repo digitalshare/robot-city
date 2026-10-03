@@ -12,6 +12,7 @@ import { initModelConfig } from './modelConfig.js';
 import { initFunctions } from './functions.js';
 import { initRobots } from './robots.js';
 import { initAiChat } from './aiChat.js';
+import { connectBridge } from '../ai/bridge.js';
 
 export function initUI(api) {
   const $ = (s) => document.querySelector(s);
@@ -661,6 +662,7 @@ export function initUI(api) {
   viewBtns.forEach((btn) => btn.addEventListener('click', () => showView(btn.dataset.view)));
 
   const chat = initAiChat({ store, toast, fnStore, openSettings: () => showView('settings'), api });
+  if (import.meta.env.DEV) connectBridge(chat.runCommand);
 
   renderGallery();
   renderObjectGallery();

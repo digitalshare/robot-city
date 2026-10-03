@@ -302,12 +302,17 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
     }
   });
 
+  // the API/MCP bridge runs a command through the composer; the submit handler reports how it ended
+  let onSettled = null;
+  let outcome = { status: 'error', statusText: 'Request failed.' };
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
     const active = getActive(store.getState());
     if (!text || !active || pending) return;
     pending = true;
+    outcome = { status: 'error', statusText: 'Request failed.' };
     input.value = '';
     history.push({ role: 'user', content: text });
     addBubble('user', text);
@@ -383,6 +388,7 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
           'or stand inside a room and redesign it.';
         addBubble('error', message);
         fnStore.endCall(callId, { status: 'blocked', statusText: message });
+        outcome = { status: 'blocked', statusText: message };
         return;
       }
       if (objecting && !roomInfo) {
@@ -392,6 +398,7 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
           'Click a building on the map to enter its interior first.';
         addBubble('error', message);
         fnStore.endCall(callId, { status: 'blocked', statusText: message });
+        outcome = { status: 'blocked', statusText: message };
         return;
       }
       const r = await chat({
@@ -406,21 +413,25 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
       if (!r.ok) {
         addBubble('error', r.message);
         fnStore.endCall(callId, { status: 'error', statusText: r.message, ms, viaProxy: r.viaProxy });
+        outcome = { status: 'error', statusText: r.message };
       } else if (fn) {
-        const outcome =
+        const result =
           fn.id === 'building'
             ? handleBuildingReply(r, site)
             : fn.id === 'space'
               ? handleSpaceReply(r, ref, !!current)
               : handleObjectReply(r, roomInfo);
-        fnStore.endCall(callId, { ...outcome, ms, viaProxy: r.viaProxy });
+        fnStore.endCall(callId, { ...result, ms, viaProxy: r.viaProxy });
+        outcome = { status: result.status, statusText: result.statusText };
       } else {
         history.push({ role: 'assistant', content: r.text });
         addBubble('assistant', r.text);
+        outcome = { status: 'ok', statusText: r.text };
       }
     } catch (err) {
       pendingEl.remove();
       addBubble('error', `Request failed: ${err.message}`);
+      outcome = { status: 'error', statusText: err.message };
       fnStore.endCall(callId, {
         status: 'error',
         statusText: err.message,
@@ -430,8 +441,24 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
       pending = false;
       syncReady();
       stickToBottom(true);
+      const done = onSettled;
+      onSettled = null;
+      if (done) done(outcome);
     }
   });
+
+  // Run a command exactly as if it were typed into the chat. Resolves with {status, statusText}.
+  function runCommand(text) {
+    if (pending) return Promise.resolve({ status: 'blocked', statusText: 'The AI chat is busy with another request.' });
+    if (!getActive(store.getState())) {
+      return Promise.resolve({ status: 'blocked', statusText: 'No AI model is configured. Add a provider in Settings.' });
+    }
+    return new Promise((resolve) => {
+      onSettled = resolve;
+      input.value = text;
+      form.requestSubmit();
+    });
+  }
 
   // Placement mode hands over a surveyed site and the space prompt hands over a building: same
   // opening move, seed the command and tell the user what the model will be given.
@@ -482,5 +509,5 @@ export function initAiChat({ store, toast, fnStore, openSettings, api }) {
   store.subscribe(syncReady);
   syncReady();
 
-  return { openWithSite, openWithSpace, openWithObject };
+  return { openWithSite, openWithSpace, openWithObject, runCommand };
 }
