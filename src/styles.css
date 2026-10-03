@@ -310,7 +310,7 @@ html, body {
 }
 #interior-back:hover { background: #4aa2ef; }
 
-#pov-bar {
+#pov-bar, #walk-bar {
   position: fixed;
   top: 18px;
   left: 50%;
@@ -338,9 +338,9 @@ html, body {
   box-shadow: 0 0 9px #35e0a1;
 }
 #pov-robot { font-weight: 600; white-space: nowrap; }
-#pov-location { white-space: nowrap; }
+#pov-location, #walk-location { white-space: nowrap; }
 .pov-hint { font-size: 10.5px; white-space: nowrap; }
-#pov-exit {
+#pov-exit, #walk-exit {
   flex: none;
   border: 0;
   border-radius: 999px;
@@ -351,7 +351,7 @@ html, body {
   font-family: inherit;
   cursor: pointer;
 }
-#pov-exit:hover, #pov-exit:focus-visible { background: #4aa2ef; outline: none; }
+#pov-exit:hover, #pov-exit:focus-visible, #walk-exit:hover, #walk-exit:focus-visible { background: #4aa2ef; outline: none; }
 
 /* ---- tooltip / toast ---- */
 #tooltip {
@@ -1053,7 +1053,7 @@ html, body {
 }
 
 @media (max-width: 650px) {
-  #pov-bar { top: auto; bottom: 18px; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
+  #pov-bar, #walk-bar { top: auto; bottom: 18px; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
   .pov-hint { display: none; }
 }
 
