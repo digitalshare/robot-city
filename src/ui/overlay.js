@@ -445,12 +445,13 @@ export function initUI(api) {
   const povRobot = $('#pov-robot');
   const povLocation = $('#pov-location');
   let povActive = false;
+  let walkActive = false;
 
   function setMode(next, def) {
     const inside = next === 'interior';
-    minimapCard.classList.toggle('hidden', inside || povActive);
-    compassEl.classList.toggle('hidden', inside || povActive);
-    interiorBar.classList.toggle('hidden', !inside || povActive);
+    minimapCard.classList.toggle('hidden', inside || povActive || walkActive);
+    compassEl.classList.toggle('hidden', inside || povActive || walkActive);
+    interiorBar.classList.toggle('hidden', !inside || povActive || walkActive || walkActive);
     townStatus.textContent = inside && def ? `Inside ${def.name}` : 'All systems operational';
     if (!inside || !def) return;
     interiorName.textContent = def.name;
@@ -473,6 +474,24 @@ export function initUI(api) {
   }
 
   $('#pov-exit').addEventListener('click', () => api.exitRobotPov());
+
+  const walkBar = $('#walk-bar');
+  const walkBtn = $('#nav-walk');
+  const walkLocation = $('#walk-location');
+  walkBtn.addEventListener('click', () => (api.isWalking() ? api.exitWalk() : api.startWalk()));
+  $('#walk-exit').addEventListener('click', () => api.exitWalk());
+
+  function setWalk(on, label = '') {
+    walkActive = on;
+    walkBar.classList.toggle('hidden', !on);
+    walkBtn.classList.toggle('active', on);
+    walkBtn.setAttribute('aria-pressed', String(on));
+    walkLocation.textContent = label;
+    if (!on) return;
+    minimapCard.classList.add('hidden');
+    compassEl.classList.add('hidden');
+    interiorBar.classList.add('hidden');
+  }
 
   const spacePrompt = $('#space-prompt');
   const spText = $('#sp-text');
@@ -690,6 +709,7 @@ export function initUI(api) {
     hidePlaceBanner,
     setMode,
     setPov,
+    setWalk,
     showSpacePrompt,
     hideSpacePrompt,
     isFunctionsOpen: fns.isOpen,

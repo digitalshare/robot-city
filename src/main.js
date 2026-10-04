@@ -113,6 +113,7 @@ applyScale();
 
 let tween = null;
 function startTween(toTarget, toCam, dur = 1200) {
+  if (walk) exitWalk();
   tween = {
     t0: performance.now(),
     dur,
@@ -143,7 +144,7 @@ function flyTo(id) {
 }
 
 function zoomBy(f) {
-  if (pov) return;
+  if (pov || walk) return;
   const offset = camera.position.clone().sub(controls.target);
   const len = THREE.MathUtils.clamp(offset.length() * f, controls.minDistance, controls.maxDistance);
   camera.position.copy(controls.target).add(offset.setLength(len));
@@ -384,6 +385,7 @@ function mountInterior(id) {
 }
 
 function exitInterior() {
+  if (walk) exitWalk();
   if (pov) exitRobotPov();
   if (mode !== 'interior') return false;
   selectObject(null);
@@ -408,6 +410,7 @@ function exitInterior() {
 }
 
 function enterInterior(id) {
+  if (walk) exitWalk();
   if (pov) exitRobotPov();
   const def = defById(id);
   if (!def) return { ok: false, reason: 'unknown-building' };
@@ -703,6 +706,7 @@ function robotLocation(rec) {
 function firstPersonRobot(id) {
   const rec = robotById(id);
   if (!rec) return { ok: false, reason: 'unknown-robot' };
+  if (walk) exitWalk();
   if (pov) exitRobotPov();
   if (placing) setPlacing(false);
   selectObject(null);
@@ -795,6 +799,178 @@ function updatePovCamera() {
   return true;
 }
 
+// ---- user first-person walk ----
+// The user's own first-person view: keyboard only. W/S move, A/D strafe,
+// the arrow keys turn and tilt the view, Shift runs. It works in the street and inside a room; the
+// street clamps to the island and slides around buildings, a room clamps to its walls and furniture.
+let walk = null;
+const WALK_EYE = 1.7;
+const WALK_RADIUS = 0.5;
+const WALK_SPEED = 7;
+const WALK_TURN = 1.9;
+const WALK_PITCH_LIMIT = 1.25;
+const walkKeys = new Set();
+const walkDir = new THREE.Vector3();
+
+function setWalkLabel() {
+  const def = mode === 'interior' ? defById(interiorId) : null;
+  ui.setWalk(true, def ? `inside ${def.name}` : 'on the streets');
+}
+
+function startWalk() {
+  if (walk) return { ok: true };
+  if (pov) exitRobotPov();
+  if (placing) setPlacing(false);
+  selectObject(null);
+  ui.closeDialogs();
+  const saved = {
+    pos: camera.position.clone(),
+    target: controls.target.clone(),
+    enabled: controls.enabled,
+    autoRotate: controls.autoRotate,
+    near: camera.near,
+    fov: camera.fov,
+  };
+  tween = null;
+  controls.enabled = false;
+  controls.autoRotate = false;
+  camera.near = 0.08;
+  camera.updateProjectionMatrix();
+  setHovered(null);
+  // face the way the orbit camera was looking, standing on the ground under the target
+  camera.getWorldDirection(walkDir);
+  const yaw = Math.atan2(walkDir.x, walkDir.z);
+  let x = controls.target.x;
+  let z = controls.target.z;
+  if (mode === 'interior') {
+    ({ x, z } = interiorWalkSpot(x, z));
+  } else {
+    ({ x, z } = townWalkSpot(x, z));
+  }
+  walk = { x, z, yaw, pitch: 0, saved };
+  renderer.domElement.style.cursor = 'default';
+  setWalkLabel();
+  updateWalkCamera();
+  return { ok: true };
+}
+
+function exitWalk() {
+  if (!walk) return false;
+  const { saved } = walk;
+  walk = null;
+  walkKeys.clear();
+  camera.position.copy(saved.pos);
+  controls.target.copy(saved.target);
+  controls.enabled = saved.enabled;
+  controls.autoRotate = saved.autoRotate;
+  camera.near = saved.near;
+  camera.updateProjectionMatrix();
+  camera.lookAt(controls.target);
+  renderer.domElement.style.cursor = 'grab';
+  ui.setWalk(false);
+  ui.setMode(mode, mode === 'interior' ? defById(interiorId) : null);
+  return true;
+}
+
+function townWalkSpot(x, z) {
+  const p = townWalkClamp(x, z);
+  return { x: p.x, z: p.z };
+}
+
+function interiorWalkSpot(x, z) {
+  const { hw, hd } = interior.room;
+  return { x: THREE.MathUtils.clamp(x, -(hw - 1), hw - 1), z: THREE.MathUtils.clamp(z, -(hd - 1), hd - 1) };
+}
+
+function townWalkClamp(x, z) {
+  const limit = reach();
+  const r = Math.hypot(x, z);
+  if (r > limit) {
+    x *= limit / r;
+    z *= limit / r;
+  }
+  for (const b of world.buildings) {
+    const dx = x - b.pos[0];
+    const dz = z - b.pos[1];
+    const min = b.footprint + WALK_RADIUS;
+    const d = Math.hypot(dx, dz);
+    if (d < min) {
+      const k = d > 1e-6 ? min / d : 0;
+      x = b.pos[0] + (k ? dx * k : min);
+      z = b.pos[1] + (k ? dz * k : 0);
+    }
+  }
+  return { x, z };
+}
+
+function interiorWalkClamp(x, z) {
+  const { hw, hd } = interior.room;
+  x = THREE.MathUtils.clamp(x, -(hw - 0.45), hw - 0.45);
+  z = THREE.MathUtils.clamp(z, -(hd - 0.45), hd - 0.45);
+  for (const b of interior.blockers) {
+    const dx = x - b.x;
+    const dz = z - b.z;
+    const min = b.r + WALK_RADIUS * 0.6;
+    const d = Math.hypot(dx, dz);
+    if (d < min) {
+      const k = d > 1e-6 ? min / d : 0;
+      x = b.x + (k ? dx * k : min);
+      z = b.z + (k ? dz * k : 0);
+    }
+  }
+  return { x, z };
+}
+
+function updateWalk(dt) {
+  if (!walk) return;
+  const turn = (walkKeys.has('ArrowLeft') ? 1 : 0) - (walkKeys.has('ArrowRight') ? 1 : 0);
+  const tilt = (walkKeys.has('ArrowUp') ? 1 : 0) - (walkKeys.has('ArrowDown') ? 1 : 0);
+  walk.yaw += turn * WALK_TURN * dt;
+  walk.pitch = THREE.MathUtils.clamp(walk.pitch + tilt * WALK_TURN * 0.6 * dt, -WALK_PITCH_LIMIT, WALK_PITCH_LIMIT);
+
+  const fwd = (walkKeys.has('KeyW') ? 1 : 0) - (walkKeys.has('KeyS') ? 1 : 0);
+  const side = (walkKeys.has('KeyD') ? 1 : 0) - (walkKeys.has('KeyA') ? 1 : 0);
+  if (fwd || side) {
+    const speed = WALK_SPEED * (walkKeys.has('ShiftLeft') || walkKeys.has('ShiftRight') ? 2 : 1)
+      * (mode === 'interior' ? 0.5 : 1);
+    const len = Math.hypot(fwd, side);
+    const sx = Math.sin(walk.yaw);
+    const sz = Math.cos(walk.yaw);
+    // yaw 0 faces +z; the right-hand side of that heading is -x
+    const mx = (sx * fwd - sz * side) / len;
+    const mz = (sz * fwd + sx * side) / len;
+    const nx = walk.x + mx * speed * dt;
+    const nz = walk.z + mz * speed * dt;
+    const p = mode === 'interior' ? interiorWalkClamp(nx, nz) : townWalkClamp(nx, nz);
+    walk.x = p.x;
+    walk.z = p.z;
+  }
+  updateWalkCamera();
+}
+
+function updateWalkCamera() {
+  camera.position.set(walk.x, WALK_EYE, walk.z);
+  const cp = Math.cos(walk.pitch);
+  walkDir.set(Math.sin(walk.yaw) * cp, Math.sin(walk.pitch), Math.cos(walk.yaw) * cp);
+  controls.target.copy(camera.position).addScaledVector(walkDir, 3);
+  camera.lookAt(controls.target);
+}
+
+const WALK_CODES = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight',
+]);
+function typingTarget(e) {
+  const t = e.target;
+  return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+}
+addEventListener('keydown', (e) => {
+  if (!walk || typingTarget(e) || e.ctrlKey || e.metaKey || e.altKey || !WALK_CODES.has(e.code)) return;
+  walkKeys.add(e.code);
+  e.preventDefault();
+});
+addEventListener('keyup', (e) => walkKeys.delete(e.code));
+addEventListener('blur', () => walkKeys.clear());
+
 // the record plus where it is standing right now: meshed in the room the camera is in, or out on
 // the street with the rest of the crowd
 function robotState(id) {
@@ -873,6 +1049,9 @@ const ui = initUI({
   focusRobot,
   firstPersonRobot,
   exitRobotPov,
+  startWalk,
+  exitWalk,
+  isWalking: () => !!walk,
   // the whole standing room as plain data: what a /space redesign is sent as its reference
   spaceState: (id) => {
     const s = spaceOf(id);
@@ -998,7 +1177,7 @@ function updateHover() {
 let downAt = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   downAt = { x: e.clientX, y: e.clientY };
-  if (pov) return;
+  if (pov || walk) return;
   if (mode !== 'interior' || !interior || e.button !== 0) return;
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
@@ -1030,7 +1209,7 @@ renderer.domElement.addEventListener('click', (e) => {
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
   pointerActive = true;
-  if (pov) return;
+  if (pov || walk) return;
   if (mode === 'interior') {
     const rid = pickInteriorRobotId();
     if (rid) ui.openRobot(rid);
@@ -1065,7 +1244,7 @@ renderer.domElement.addEventListener('click', (e) => {
 });
 
 renderer.domElement.addEventListener('dblclick', (e) => {
-  if (pov || placing || mode !== 'town') return;
+  if (pov || walk || placing || mode !== 'town') return;
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
@@ -1082,7 +1261,8 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (pov) exitRobotPov();
+  if (walk) exitWalk();
+  else if (pov) exitRobotPov();
   else if (ui.isFunctionsOpen()) ui.hideFunctionsPanel();
   else if (ui.isRobotsOpen()) ui.hideRobotsPanel();
   else if (ui.isDialogOpen()) ui.closeDialogs();
@@ -1112,13 +1292,14 @@ function tick(now) {
       tween = null;
       controls.enabled = true;
     }
-  } else if (!pov) {
+  } else if (!pov && !walk) {
     controls.update();
   }
 
   if (mode === 'interior') {
-    clampInteriorTarget();
+    if (!walk) clampInteriorTarget();
     updateRobots(interior, dt, now);
+    updateWalk(dt);
     if (pov) updatePovCamera();
     renderer.render(mode === 'interior' ? interior.scene : scene, camera);
     return;
@@ -1135,8 +1316,12 @@ function tick(now) {
   // the interior branch returned above, so the street crowd is the only walkers running here
   updateCrowd(dt, now, camera);
   if (pov) updatePovCamera();
+  updateWalk(dt);
 
-  if (pov) {
+  if (pov || walk) {
+    if (walk) {
+      ui.drawMinimap({ x: walk.x, z: walk.z, dx: Math.sin(walk.yaw), dz: Math.cos(walk.yaw) });
+    }
     renderer.render(mode === 'interior' ? interior.scene : scene, camera);
     return;
   }
@@ -1201,6 +1386,9 @@ window.__robotTown = {
   robot: robotState,
   firstPersonRobot,
   exitRobotPov,
+  startWalk,
+  exitWalk,
+  walk: () => (walk ? { x: walk.x, z: walk.z, yaw: walk.yaw, pitch: walk.pitch, mode } : null),
   pov: () => (pov ? {
     id: pov.id,
     location: pov.location,
